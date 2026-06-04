@@ -3,7 +3,12 @@ name: Deploy VitePress site to Pages
 on:
   push:
     branches: [main]
-    paths: ['docs/**']
+    paths:
+      - 'docs/**'
+      - 'server/routes/**'
+      - 'server/validations/**'
+      - 'server/openapi.js'
+      - 'scripts/generate-openapi.js'
   workflow_dispatch:
 
 permissions:

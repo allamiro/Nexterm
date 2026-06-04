@@ -65,13 +65,21 @@ module.exports.generateOpenAPISpec = (app) => {
         },
     };
 
+    // Passed as the second argument (userSwagger) so express-jsdoc-swagger merges
+    // them via merge.recursive() before firing the "finish" event. Putting schemas
+    // in `options` instead has no effect — express-jsdoc-swagger only reads specific
+    // config keys from options, it does not forward arbitrary OpenAPI content.
+    const userSwagger = {
+        components: {
+            schemas: validationSchemas,
+        },
+    };
+
     return new Promise((resolve, reject) => {
-        const instance = expressJSDocSwagger(app)(options);
+        const instance = expressJSDocSwagger(app)(options, userSwagger);
 
         instance.on("finish", (swaggerSpec) => {
             try {
-                Object.assign(swaggerSpec.components.schemas, validationSchemas);
-
                 resolve(swaggerSpec);
             } catch (error) {
                 reject(error);
