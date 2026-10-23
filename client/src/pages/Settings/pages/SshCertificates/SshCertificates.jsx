@@ -51,6 +51,17 @@ const parseMappings = (value) => String(value || "").split("\n").map((line) => l
     };
 });
 
+const authorityConfig = (form) => {
+    if (form.backend === "vault") {
+        return { address: form.address.trim(), mount: form.mount.trim(), role: form.role.trim(), namespace: form.namespace.trim() };
+    }
+    if (form.backend === "step") {
+        return { url: form.url.trim(), tokenMode: form.tokenMode, provisioner: form.provisioner.trim() };
+    }
+    if (form.backend === "webhook") return { url: form.url.trim() };
+    return {};
+};
+
 const formFromAuthority = (authority) => ({
     ...emptyForm(),
     name: authority.name || "",
@@ -101,7 +112,7 @@ export const SshCertificates = () => {
         }
     };
 
-    useEffect(() => { load(); }, []);
+    useEffect(() => { void load(); }, []);
 
     const update = (field) => (value) => setForm((current) => ({ ...current, [field]: value }));
 
@@ -154,13 +165,7 @@ export const SshCertificates = () => {
             ttlByGroup,
             ttlByEnvironment,
             keyIdTemplate: form.keyIdTemplate.trim() || "{{username}}",
-            config: form.backend === "vault"
-                ? { address: form.address.trim(), mount: form.mount.trim(), role: form.role.trim(), namespace: form.namespace.trim() }
-                : form.backend === "step"
-                    ? { url: form.url.trim(), tokenMode: form.tokenMode, provisioner: form.provisioner.trim() }
-                    : form.backend === "webhook"
-                        ? { url: form.url.trim() }
-                        : {},
+            config: authorityConfig(form),
         };
         if (form.secret.trim()) payload.secret = form.secret;
 

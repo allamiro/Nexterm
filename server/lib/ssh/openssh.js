@@ -1,4 +1,4 @@
-const crypto = require("crypto");
+const crypto = require("node:crypto");
 
 const CERT_TYPES = new Set([
     "ssh-ed25519-cert-v01@openssh.com",
@@ -115,7 +115,7 @@ const encodeOpenSshPrivateKey = (seed, rawPublic, comment = "nexterm") => {
 
 const parseOpenSshPrivateKey = (material) => {
     const trimmed = String(material || "").trim();
-    const match = trimmed.match(/-----BEGIN OPENSSH PRIVATE KEY-----([\s\S]+)-----END OPENSSH PRIVATE KEY-----/);
+    const match = /-----BEGIN OPENSSH PRIVATE KEY-----([\s\S]+)-----END OPENSSH PRIVATE KEY-----/.exec(trimmed);
     if (!match) return null;
 
     const body = Buffer.from(match[1].replace(/\s/g, ""), "base64");
@@ -387,7 +387,7 @@ const certificateLine = (text) => String(text || "")
 const normalizeCertificate = (text) => {
     const line = certificateLine(text);
     if (!line) throw new Error("SSH certificate is empty");
-    const match = line.match(/^(\S+)\s+([A-Za-z0-9+/=]+)(?:\s+(\S+))?$/);
+    const match = /^(\S+)\s+([A-Za-z0-9+/=]+)(?:\s+(\S+))?$/.exec(line);
     if (!match || !CERT_TYPES.has(match[1])) throw new Error("SSH certificate is not an OpenSSH user certificate");
     const decoded = Buffer.from(match[2], "base64");
     if (!decoded.length) throw new Error("SSH certificate is malformed");

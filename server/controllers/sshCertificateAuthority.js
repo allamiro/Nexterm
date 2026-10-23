@@ -14,7 +14,7 @@ const record = (authority) => (authority?.get ? authority.get({ plain: true }) :
 
 const sanitize = (authority) => {
     const value = record(authority);
-    const config = { ...(value.config || {}) };
+    const config = value.config ? { ...value.config } : {};
     return {
         id: value.id,
         name: value.name,
@@ -36,37 +36,57 @@ const sanitize = (authority) => {
     };
 };
 
-const validateBackend = (backend, config = {}, secret, { creating }) => {
-    if (backend === "local") {
-        if (creating && !secret) return "A CA private key is required";
-        if (secret) {
-            try {
-                return { publicKey: publicKeyFromPrivate(secret) };
-            } catch (error) {
-                return error.message;
-            }
-        }
-        return {};
+const validateLocal = (secret, creating) => {
+    if (creating && !secret) return "A CA private key is required";
+    if (!secret) return null;
+    try {
+        publicKeyFromPrivate(secret);
+        return null;
+    } catch (error) {
+        return error.message;
     }
-    if (backend === "vault" && (!config.address || !config.mount || !config.role)) return "Vault address, mount, and role are required";
-    if (backend === "step" && !config.url) return "A step-ca URL is required";
-    if (backend === "step" && config.tokenMode === "provisioner") {
-        if (!config.provisioner) return "A step-ca provisioner name is required";
-        if (secret) {
-            try {
-                loadProvisionerKey(secret);
-            } catch (error) {
-                return error.message;
-            }
-        }
+};
+
+const validateVault = (config) => {
+    if (!config.address || !config.mount || !config.role) return "Vault address, mount, and role are required";
+    return null;
+};
+
+const validateStep = (config, secret) => {
+    if (!config.url) return "A step-ca URL is required";
+    if (config.tokenMode !== "provisioner") return null;
+    if (!config.provisioner) return "A step-ca provisioner name is required";
+    if (!secret) return null;
+    try {
+        loadProvisionerKey(secret);
+        return null;
+    } catch (error) {
+        return error.message;
     }
-    if (backend === "webhook" && !config.url) return "A webhook URL is required";
-    if (creating && backend !== "webhook" && !secret) return "A signing token is required";
-    return {};
+};
+
+const validateWebhook = (config) => (config.url ? null : "A webhook URL is required");
+
+const backendValidators = {
+    local: (config, secret, creating) => validateLocal(secret, creating),
+    vault: (config) => validateVault(config),
+    step: (config, secret) => validateStep(config, secret),
+    webhook: (config) => validateWebhook(config),
+};
+
+const validateBackend = (backend, config, secret, creating) => {
+    const settings = config || {};
+    const validator = backendValidators[backend];
+    if (!validator) return "SSH certificate authority backend is not supported";
+    const message = validator(settings, secret, creating);
+    if (message) return message;
+    if (creating && backend !== "local" && backend !== "webhook" && !secret) return "A signing token is required";
+    return null;
 };
 
 const applyConfig = (backend, config, secret, existingConfig = {}) => {
-    const next = { ...existingConfig, ...(config || {}) };
+    const next = { ...existingConfig };
+    if (config) Object.assign(next, config);
     delete next.publicKey;
     if (backend === "local") {
         if (secret) next.publicKey = publicKeyFromPrivate(secret);
@@ -98,8 +118,8 @@ const createCertificateAuthority = async (accountId, body) => {
     } catch (error) {
         return { code: 400, message: error.message };
     }
-    const checked = validateBackend(body.backend, body.config, body.secret, { creating: true });
-    if (typeof checked === "string") return { code: 400, message: checked };
+    const checked = validateBackend(body.backend, body.config, body.secret, true);
+    if (checked) return { code: 400, message: checked };
 
     const authority = await SshCertificateAuthority.create({
         name: body.name,
@@ -130,8 +150,8 @@ const updateCertificateAuthority = async (accountId, id, body) => {
 
     const backend = body.backend || authority.backend;
     const secret = body.secret === "" ? null : body.secret;
-    const checked = validateBackend(backend, body.config || authority.config, secret, { creating: false });
-    if (typeof checked === "string") return { code: 400, message: checked };
+    const checked = validateBackend(backend, body.config || authority.config, secret, false);
+    if (checked) return { code: 400, message: checked };
     if (body.sourceAddress !== undefined) {
         try {
             authority.sourceAddress = normalizeSourceAddress(body.sourceAddress);
@@ -140,19 +160,12 @@ const updateCertificateAuthority = async (accountId, id, body) => {
         }
     }
 
-    if (body.name !== undefined) authority.name = body.name;
+    const fields = ["name", "enabled", "ttlSeconds", "extraPrincipals", "groupPrincipalMappings", "selectorGroups", "domains", "environments", "ttlByGroup", "ttlByEnvironment", "keyIdTemplate"];
+    for (const field of fields) {
+        if (body[field] !== undefined) authority[field] = body[field];
+    }
     authority.backend = backend;
-    if (body.enabled !== undefined) authority.enabled = body.enabled;
     if (body.organizationId !== undefined) authority.organizationId = body.organizationId || null;
-    if (body.ttlSeconds !== undefined) authority.ttlSeconds = body.ttlSeconds;
-    if (body.extraPrincipals !== undefined) authority.extraPrincipals = body.extraPrincipals;
-    if (body.groupPrincipalMappings !== undefined) authority.groupPrincipalMappings = body.groupPrincipalMappings;
-    if (body.selectorGroups !== undefined) authority.selectorGroups = body.selectorGroups;
-    if (body.domains !== undefined) authority.domains = body.domains;
-    if (body.environments !== undefined) authority.environments = body.environments;
-    if (body.ttlByGroup !== undefined) authority.ttlByGroup = body.ttlByGroup;
-    if (body.ttlByEnvironment !== undefined) authority.ttlByEnvironment = body.ttlByEnvironment;
-    if (body.keyIdTemplate !== undefined) authority.keyIdTemplate = body.keyIdTemplate;
     if (body.config !== undefined || secret) authority.config = applyConfig(backend, body.config, secret, authority.config || {});
     if (secret) authority.secret = secret;
     await authority.save();

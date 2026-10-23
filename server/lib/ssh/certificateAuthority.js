@@ -1,4 +1,4 @@
-const crypto = require("crypto");
+const crypto = require("node:crypto");
 const {
     generateEd25519KeyPair,
     signUserCertificate,
@@ -8,9 +8,20 @@ const {
 const { resolvePrincipals, renderKeyId, normalizeSourceAddress, asArray, resolveTtl } = require("./principals");
 const { mintStepSshToken } = require("./stepToken");
 
-const safeMessage = (message) => String(message || "SSH certificate request failed")
-    .replace(/-----BEGIN[\s\S]*?-----END[^-]+-----/g, "[redacted]")
-    .slice(0, 300);
+const redactSecrets = (message) => {
+    let text = String(message || "SSH certificate request failed");
+    let begin = text.indexOf("-----BEGIN");
+    while (begin !== -1) {
+        const end = text.indexOf("-----END", begin + 11);
+        const close = end === -1 ? -1 : text.indexOf("-----", end + 8);
+        if (close === -1) break;
+        text = `${text.slice(0, begin)}[redacted]${text.slice(close + 5)}`;
+        begin = text.indexOf("-----BEGIN");
+    }
+    return text.slice(0, 300);
+};
+
+const safeMessage = (message) => redactSecrets(message);
 
 const readResponse = async (response) => {
     const text = await response.text();
@@ -66,85 +77,80 @@ const assertHttpUrl = (value, label) => {
     return url;
 };
 
-const signWithBackend = async ({ ca, secret, publicKey, principals, keyId, ttlSeconds, validAfter, validBefore, sourceAddress, rawPublic, serial, fetchImpl }) => {
-    if (ca.backend === "local") {
-        return signUserCertificate({
-            caPrivateKey: secret,
-            rawPublic,
-            keyId,
+const signLocal = ({ secret, rawPublic, keyId, principals, serial, validAfter, validBefore, sourceAddress }) => signUserCertificate({
+    caPrivateKey: secret,
+    rawPublic,
+    keyId,
+    principals,
+    serial,
+    validAfter,
+    validBefore,
+    sourceAddress,
+});
+
+const signVault = async ({ ca, secret, publicKey, principals, keyId, ttlSeconds, sourceAddress, fetchImpl }) => {
+    const address = assertHttpUrl(ca.config?.address, "Vault address");
+    const mount = String(ca.config?.mount || "ssh").replace(/^\/+|\/+$/g, "");
+    const role = ca.config?.role;
+    if (!mount || !role) throw new Error("Vault mount and role are required");
+    const url = new URL(`/v1/${mount}/sign/${encodeURIComponent(role)}`, address);
+    const headers = { "x-vault-token": secret };
+    if (ca.config?.namespace) headers["x-vault-namespace"] = ca.config.namespace;
+    const body = {
+        public_key: publicKey,
+        valid_principals: principals.join(","),
+        cert_type: "user",
+        ttl: `${ttlSeconds}s`,
+        key_id: keyId,
+    };
+    if (sourceAddress) body.critical_options = { "source-address": sourceAddress };
+    return certificateFromPayload(await postJson(fetchImpl, url, { headers, body }));
+};
+
+const signStep = async ({ ca, secret, publicKey, principals, keyId, validAfter, validBefore, fetchImpl }) => {
+    const endpoint = new URL("/ssh/sign", assertHttpUrl(ca.config?.url, "step-ca URL"));
+    const tokenMode = ca.config?.tokenMode || "ott";
+    const headers = {};
+    const body = {
+        publicKey,
+        certType: "user",
+        keyId,
+        principals,
+        validAfter: new Date(validAfter * 1000).toISOString(),
+        validBefore: new Date(validBefore * 1000).toISOString(),
+    };
+    if (tokenMode === "bearer") headers.authorization = `Bearer ${secret}`;
+    else if (tokenMode === "provisioner") {
+        body.ott = mintStepSshToken({ secret, config: ca.config, subject: ca.subject, publicKey, principals, keyId, validAfter, validBefore });
+    } else body.ott = secret;
+    return certificateFromPayload(await postJson(fetchImpl, endpoint, { headers, body }));
+};
+
+const signWebhook = async ({ ca, secret, publicKey, principals, keyId, ttlSeconds, validAfter, validBefore, sourceAddress, fetchImpl }) => {
+    const url = assertHttpUrl(ca.config?.url, "Webhook URL");
+    const headers = {};
+    if (secret) headers.authorization = `Bearer ${secret}`;
+    return certificateFromPayload(await postJson(fetchImpl, url, {
+        headers,
+        body: {
+            publicKey,
             principals,
-            serial,
-            validAfter,
-            validBefore,
+            keyId,
+            ttlSeconds,
+            validAfter: new Date(validAfter * 1000).toISOString(),
+            validBefore: new Date(validBefore * 1000).toISOString(),
             sourceAddress,
-        });
-    }
+            certType: "user",
+        },
+    }));
+};
 
-    if (ca.backend === "vault") {
-        const address = assertHttpUrl(ca.config?.address, "Vault address");
-        const mount = String(ca.config?.mount || "ssh").replace(/^\/+|\/+$/g, "");
-        const role = ca.config?.role;
-        if (!mount || !role) throw new Error("Vault mount and role are required");
-        const url = new URL(`/v1/${mount}/sign/${encodeURIComponent(role)}`, address);
-        const headers = { "x-vault-token": secret };
-        if (ca.config?.namespace) headers["x-vault-namespace"] = ca.config.namespace;
-        const payload = await postJson(fetchImpl, url, {
-            headers,
-            body: {
-                public_key: publicKey,
-                valid_principals: principals.join(","),
-                cert_type: "user",
-                ttl: `${ttlSeconds}s`,
-                key_id: keyId,
-                ...(sourceAddress ? { critical_options: { "source-address": sourceAddress } } : {}),
-            },
-        });
-        return certificateFromPayload(payload);
-    }
+const signers = { local: signLocal, vault: signVault, step: signStep, webhook: signWebhook };
 
-    if (ca.backend === "step") {
-        const url = assertHttpUrl(ca.config?.url, "step-ca URL");
-        const endpoint = new URL("/ssh/sign", url);
-        const tokenMode = ca.config?.tokenMode || "ott";
-        const headers = tokenMode === "bearer" ? { authorization: `Bearer ${secret}` } : {};
-        const ott = tokenMode === "provisioner"
-            ? mintStepSshToken({ secret, config: ca.config, subject: ca.subject, publicKey, principals, keyId, validAfter, validBefore })
-            : secret;
-        const payload = await postJson(fetchImpl, endpoint, {
-            headers,
-            body: {
-                publicKey,
-                certType: "user",
-                keyId,
-                principals,
-                validAfter: new Date(validAfter * 1000).toISOString(),
-                validBefore: new Date(validBefore * 1000).toISOString(),
-                ...(tokenMode === "bearer" ? {} : { ott }),
-            },
-        });
-        return certificateFromPayload(payload);
-    }
-
-    if (ca.backend === "webhook") {
-        const url = assertHttpUrl(ca.config?.url, "Webhook URL");
-        const headers = secret ? { authorization: `Bearer ${secret}` } : {};
-        const payload = await postJson(fetchImpl, url, {
-            headers,
-            body: {
-                publicKey,
-                principals,
-                keyId,
-                ttlSeconds,
-                validAfter: new Date(validAfter * 1000).toISOString(),
-                validBefore: new Date(validBefore * 1000).toISOString(),
-                sourceAddress,
-                certType: "user",
-            },
-        });
-        return certificateFromPayload(payload);
-    }
-
-    throw new Error("SSH certificate authority backend is not supported");
+const signWithBackend = async (request) => {
+    const signer = signers[request.ca.backend];
+    if (!signer) throw new Error("SSH certificate authority backend is not supported");
+    return signer(request);
 };
 
 const issueForSession = async ({ ca, secret, identity, account, entry, fetchImpl = global.fetch }) => {

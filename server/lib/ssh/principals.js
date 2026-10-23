@@ -1,4 +1,4 @@
-const net = require("net");
+const net = require("node:net");
 
 const asArray = (value) => {
     if (Array.isArray(value)) return value;
@@ -17,14 +17,14 @@ const addPrincipal = (principals, value) => {
     const principal = String(value || "").trim();
     if (!principal) return;
     if (principal.length > 128) throw new Error("SSH principal is too long");
-    if (/[\u0000-\u001f,\s]/.test(principal)) throw new Error("SSH principal contains invalid characters");
+    if (/[\u0000-\u0008\u000e-\u001f\s,]/.test(principal)) throw new Error("SSH principal contains invalid characters");
     if (!principals.includes(principal)) principals.push(principal);
 };
 
 const resolvePrincipals = ({ username, groups = [], groupPrincipalMappings = [], extraPrincipals = [] }) => {
     const principals = [];
     addPrincipal(principals, username);
-    const groupSet = new Set(asArray(groups).map((group) => String(group)));
+    const groupSet = new Set(asArray(groups).map(String));
     for (const mapping of asArray(groupPrincipalMappings)) {
         if (!mapping || !groupSet.has(String(mapping.group))) continue;
         for (const principal of asArray(mapping.principals)) addPrincipal(principals, principal);
@@ -115,7 +115,8 @@ const normalizeSourceAddress = (value) => {
         const [address, prefix] = part.split("/");
         const version = net.isIP(address);
         if (!version || part.split("/").length > 2) throw new Error("SSH certificate source address is invalid");
-        const bits = prefix === undefined ? (version === 4 ? 32 : 128) : Number(prefix);
+        const defaultBits = version === 4 ? 32 : 128;
+        const bits = prefix === undefined ? defaultBits : Number(prefix);
         const max = version === 4 ? 32 : 128;
         if (!Number.isInteger(bits) || bits < 0 || bits > max) throw new Error("SSH certificate source address is invalid");
         return `${address}/${bits}`;

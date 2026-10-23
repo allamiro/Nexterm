@@ -27,8 +27,11 @@ const sshKeygen = () => {
     }
 };
 
-test("generates an OpenSSH key that ssh-keygen can read", () => {
-    if (!sshKeygen()) return;
+test("generates an OpenSSH key that ssh-keygen can read", (t) => {
+    if (!sshKeygen()) {
+        t.skip();
+        return;
+    }
     const pair = generateEd25519KeyPair("session");
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nexterm-ssh-"));
     const keyPath = path.join(directory, "id_ed25519");
@@ -178,8 +181,11 @@ test("signs with an RSA CA key", () => {
     signWithCa(privateKey.export({ type: "pkcs8", format: "pem" }));
 });
 
-test("reads an OpenSSH ECDSA CA key", () => {
-    if (!sshKeygen()) return;
+test("reads an OpenSSH ECDSA CA key", (t) => {
+    if (!sshKeygen()) {
+        t.skip();
+        return;
+    }
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nexterm-ca-"));
     const keyPath = path.join(directory, "ca");
     execFileSync("ssh-keygen", ["-q", "-t", "ecdsa", "-b", "256", "-N", "", "-f", keyPath]);

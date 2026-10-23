@@ -1,4 +1,4 @@
-const crypto = require("crypto");
+const crypto = require("node:crypto");
 
 const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
 

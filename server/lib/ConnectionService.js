@@ -58,33 +58,34 @@ const getHostPort = (entry, defaultPort = 22) => {
     return { host, port };
 };
 
+const loadJumpHost = async (jumpHostId, account) => {
+    const jhEntry = await Entry.findByPk(jumpHostId);
+    if (!jhEntry) throw new Error(`Jump host entry ${jumpHostId} not found`);
+
+    const { host, port } = getHostPort(jhEntry);
+    const identity = extractIdentity(await resolveIdentity(jhEntry, null, null, null));
+    if (!identity) throw new Error(`No identity found for jump host ${jumpHostId}`);
+
+    const credentials = await resolveCredentials(identity);
+    const params = await prepareSshAuth({ entry: jhEntry, identity, credentials, account });
+    return {
+        host,
+        port,
+        username: params.username || "",
+        password: params.password || null,
+        privateKey: params.privateKey || null,
+        passphrase: params.passphrase || null,
+        certificate: params.certificate || null,
+    };
+};
+
 const resolveJumpHosts = async (entry, account = null) => {
-    const jumpHostIds = entry.config?.jumpHosts;
-    if (!jumpHostIds || jumpHostIds.length === 0) return [];
-
-    const jumpHosts = [];
-    for (const jumpHostId of jumpHostIds) {
-        const jhEntry = await Entry.findByPk(jumpHostId);
-        if (!jhEntry) throw new Error(`Jump host entry ${jumpHostId} not found`);
-
-        const { host, port } = getHostPort(jhEntry);
-        const identityResult = await resolveIdentity(jhEntry, null, null, null);
-        const identity = extractIdentity(identityResult);
-        if (!identity) throw new Error(`No identity found for jump host ${jumpHostId}`);
-
-        const credentials = await resolveCredentials(identity);
-        const params = await prepareSshAuth({ entry: jhEntry, identity, credentials, account });
-        jumpHosts.push({
-            host,
-            port,
-            username: params.username || "",
-            password: params.password || null,
-            privateKey: params.privateKey || null,
-            passphrase: params.passphrase || null,
-            certificate: params.certificate || null,
-        });
-    }
-    return jumpHosts;
+    const jumpHostIds = entry.config?.jumpHosts || [];
+    return jumpHostIds.reduce(async (previous, jumpHostId) => {
+        const jumpHosts = await previous;
+        jumpHosts.push(await loadJumpHost(jumpHostId, account));
+        return jumpHosts;
+    }, Promise.resolve([]));
 };
 
 const openEngineSessionWithResult = async (sessionId, sessionType, host, port, params, jumpHosts = [], engineId) => {

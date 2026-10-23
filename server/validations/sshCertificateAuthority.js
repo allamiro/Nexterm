@@ -1,6 +1,6 @@
 const Joi = require("joi");
 
-const principal = Joi.string().trim().min(1).max(128).pattern(/^[^\s,\u0000-\u001f]+$/);
+const principal = Joi.string().trim().min(1).max(128).pattern(/^[^\u0000-\u0008\u000e-\u001f\s,]+$/);
 const mapping = Joi.object({
     group: Joi.string().trim().min(1).max(256).required(),
     principals: Joi.array().items(principal).min(1).max(16).required(),

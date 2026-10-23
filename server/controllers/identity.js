@@ -43,28 +43,35 @@ const syncCertificate = async (identityId, sshCertificate) => {
     await upsertCredential(identityId, "ssh-certificate", normalizeCertificate(sshCertificate));
 };
 
-const syncCredentials = async (identityId, type, password, sshKey, passphrase, sshCertificate) => {
-    if (type === "password" && password) {
-        await upsertCredential(identityId, "password", password);
-        await Credential.destroy({ where: { identityId, type: { [Op.in]: ["ssh-key", "passphrase", "ssh-certificate"] } } });
-    } else if (type === "password-only" && password) {
-        await upsertCredential(identityId, "password", password);
-        await Credential.destroy({ where: { identityId, type: { [Op.in]: ["ssh-key", "passphrase", "ssh-certificate"] } } });
-    } else if (type === "both") {
-        if (password) await upsertCredential(identityId, "password", password);
-        if (sshKey) {
-            await upsertCredential(identityId, "ssh-key", sshKey);
-            passphrase ? await upsertCredential(identityId, "passphrase", passphrase) : await Credential.destroy({ where: { identityId, type: "passphrase" } });
-        }
-        await syncCertificate(identityId, sshCertificate);
-    } else if (type === "ssh" && sshKey) {
+const removeCredentialTypes = (identityId, types) => Credential.destroy({ where: { identityId, type: { [Op.in]: types } } });
+
+const syncPassphrase = async (identityId, passphrase) => {
+    if (passphrase) await upsertCredential(identityId, "passphrase", passphrase);
+    else await Credential.destroy({ where: { identityId, type: "passphrase" } });
+};
+
+const syncPasswordIdentity = async (identityId, password) => {
+    if (!password) return;
+    await upsertCredential(identityId, "password", password);
+    await removeCredentialTypes(identityId, ["ssh-key", "passphrase", "ssh-certificate"]);
+};
+
+const syncKeyIdentity = async (identityId, type, password, sshKey, passphrase, sshCertificate) => {
+    if (type === "both" && password) await upsertCredential(identityId, "password", password);
+    if (sshKey) {
         await upsertCredential(identityId, "ssh-key", sshKey);
-        passphrase ? await upsertCredential(identityId, "passphrase", passphrase) : await Credential.destroy({ where: { identityId, type: "passphrase" } });
-        await Credential.destroy({ where: { identityId, type: "password" } });
-        await syncCertificate(identityId, sshCertificate);
-    } else if ((type === "ssh" || type === "both") && sshCertificate !== undefined) {
-        await syncCertificate(identityId, sshCertificate);
+        await syncPassphrase(identityId, passphrase);
     }
+    if (type === "ssh" && sshKey) await Credential.destroy({ where: { identityId, type: "password" } });
+    await syncCertificate(identityId, sshCertificate);
+};
+
+const syncCredentials = async (identityId, type, password, sshKey, passphrase, sshCertificate) => {
+    if (type === "password" || type === "password-only") {
+        await syncPasswordIdentity(identityId, password);
+        return;
+    }
+    if (type === "both" || type === "ssh") await syncKeyIdentity(identityId, type, password, sshKey, passphrase, sshCertificate);
 };
 
 module.exports.getIdentityCredentials = async (identityId) => {
@@ -139,7 +146,9 @@ module.exports.updateIdentity = async (accountId, identityId, config) => {
     const check = await validateManageAccess(accountId, identity);
     if (!check.valid) return check.error;
 
-    const { password, sshKey, passphrase, sshCertificate, accountId: _, organizationId: __, ...updateConfig } = config;
+    const { password, sshKey, passphrase, sshCertificate, ...updateConfig } = config;
+    delete updateConfig.accountId;
+    delete updateConfig.organizationId;
     await Identity.update(updateConfig, { where: { id: identityId, ...(identity.organizationId ? { organizationId: identity.organizationId } : { accountId }) } });
 
     const effectiveType = config.type || identity.type;

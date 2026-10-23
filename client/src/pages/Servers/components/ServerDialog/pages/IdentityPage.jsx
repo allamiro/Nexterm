@@ -33,12 +33,10 @@ const Identity = ({ identity, onUpdate, onDelete, onMoveToOrg, isOrgContext, org
         ? allAuthOptions.filter(opt => allowedAuthTypes.includes(opt.value))
         : allAuthOptions.filter(opt => ["password", "ssh", "both"].includes(opt.value));
 
-    const readTextFile = (setter) => (e) => {
-        const file = e.target.files?.[0];
+    const readTextFile = (setter) => (event) => {
+        const file = event.target.files?.[0];
         if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => setter(ev.target.result);
-        reader.readAsText(file);
+        file.text().then(setter).catch(() => {});
     };
 
     useEffect(() => {
