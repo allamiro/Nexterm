@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
+const crypto = require("node:crypto");
 
 const {
     generateEd25519KeyPair,
@@ -13,8 +14,9 @@ const {
     describeCertificate,
     loadEd25519PrivateKey,
 } = require("../lib/ssh/openssh");
-const { resolvePrincipals, renderKeyId, normalizeSourceAddress, clampTtl } = require("../lib/ssh/principals");
+const { resolvePrincipals, renderKeyId, normalizeSourceAddress, clampTtl, selectAuthority, resolveTtl } = require("../lib/ssh/principals");
 const { issueForSession } = require("../lib/ssh/certificateAuthority");
+const { mintStepSshToken } = require("../lib/ssh/stepToken");
 
 const sshKeygen = () => {
     try {
@@ -142,6 +144,142 @@ test("issues a short-lived certificate through a webhook without returning the p
     assert.equal(JSON.stringify(issued.metadata).includes("PRIVATE"), false);
     assert.equal(issued.metadata.keyId, "alice@web-1");
     assert.equal(describeCertificate(issued.certificate).signatureValid, true);
+});
+
+const signWithCa = (caPrivateKey) => {
+    const user = generateEd25519KeyPair("alice");
+    const now = Math.floor(Date.now() / 1000);
+    const certificate = signUserCertificate({
+        caPrivateKey,
+        rawPublic: user.rawPublic,
+        keyId: "alice@example",
+        principals: ["alice"],
+        serial: 9,
+        validAfter: now - 30,
+        validBefore: now + 300,
+    });
+    assert.equal(describeCertificate(certificate).signatureValid, true);
+    if (!sshKeygen()) return;
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nexterm-cert-"));
+    const certPath = path.join(directory, "id_ed25519-cert.pub");
+    fs.writeFileSync(certPath, certificate);
+    const inspected = execFileSync("ssh-keygen", ["-L", "-f", certPath], { encoding: "utf8" });
+    assert.match(inspected, /alice@example/);
+    fs.rmSync(directory, { recursive: true, force: true });
+};
+
+test("signs with an ECDSA CA key", () => {
+    const { privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    signWithCa(privateKey.export({ type: "pkcs8", format: "pem" }));
+});
+
+test("signs with an RSA CA key", () => {
+    const { privateKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+    signWithCa(privateKey.export({ type: "pkcs8", format: "pem" }));
+});
+
+test("reads an OpenSSH ECDSA CA key", () => {
+    if (!sshKeygen()) return;
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nexterm-ca-"));
+    const keyPath = path.join(directory, "ca");
+    execFileSync("ssh-keygen", ["-q", "-t", "ecdsa", "-b", "256", "-N", "", "-f", keyPath]);
+    const material = fs.readFileSync(keyPath, "utf8");
+    assert.match(publicKeyFromPrivate(material), /^ecdsa-sha2-nistp256 /);
+    signWithCa(material);
+    fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test("selects an authority from group, domain, and environment and applies the lifetime", () => {
+    const account = { oidcGroups: ["linux-admins"] };
+    const entry = { organizationId: 2, config: { domain: "corp.example", environment: "production" } };
+    const chosen = selectAuthority([
+        { id: 1, enabled: true, organizationId: 2, selectorGroups: [], domains: [], environments: [] },
+        { id: 2, enabled: true, organizationId: null, selectorGroups: ["linux-admins"], domains: ["corp.example"], environments: ["production"] },
+        { id: 3, enabled: true, organizationId: null, selectorGroups: [], domains: [], environments: [] },
+    ], { account, entry });
+    assert.equal(chosen.id, 2);
+    assert.equal(resolveTtl({
+        ca: { ttlSeconds: 300, ttlByGroup: [{ group: "linux-admins", ttlSeconds: 900 }], ttlByEnvironment: [{ environment: "production", ttlSeconds: 120 }] },
+        account,
+        entry,
+    }), 900);
+    assert.equal(resolveTtl({ ca: { ttlSeconds: 300 }, account, entry: { config: { sshCertTtl: 60 } } }), 60);
+});
+
+test("mints a step-ca provisioner token and sends it to the signer", async () => {
+    const { privateKey, publicKey } = crypto.generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    const jwk = privateKey.export({ format: "jwk" });
+    const caKey = generateEd25519KeyPair("ca");
+    let seen;
+    const fetchImpl = async (_url, options) => {
+        seen = JSON.parse(options.body);
+        const userPublic = Buffer.from(seen.publicKey.split(" ")[1], "base64");
+        const { value: rawPublic } = readPublic(userPublic);
+        const certificate = signUserCertificate({
+            caPrivateKey: caKey.privateKey,
+            rawPublic,
+            keyId: seen.keyId,
+            principals: seen.principals,
+            serial: 11,
+            validAfter: Math.floor(Date.parse(seen.validAfter) / 1000),
+            validBefore: Math.floor(Date.parse(seen.validBefore) / 1000),
+        });
+        return { ok: true, text: async () => JSON.stringify({ certificate }) };
+    };
+
+    const issued = await issueForSession({
+        ca: {
+            id: 8,
+            name: "step",
+            enabled: true,
+            backend: "step",
+            ttlSeconds: 300,
+            keyIdTemplate: "{{subject}}",
+            groupPrincipalMappings: [],
+            extraPrincipals: [],
+            config: { url: "https://ca.example", tokenMode: "provisioner", provisioner: "ops" },
+        },
+        secret: JSON.stringify(jwk),
+        identity: { username: "alice" },
+        account: { username: "a.smith", idpSubject: "user-1", oidcGroups: [] },
+        entry: { id: 1, name: "web", config: {} },
+        fetchImpl,
+    });
+
+    const [, payload] = seen.ott.split(".");
+    const claims = JSON.parse(Buffer.from(payload, "base64url").toString());
+    assert.equal(claims.iss, "ops");
+    assert.equal(claims.aud, "https://ca.example/ssh/sign");
+    assert.equal(claims.sub, "user-1");
+    assert.deepEqual(claims.step.ssh.principals, ["alice"]);
+    const token = mintStepSshToken({
+        secret: JSON.stringify(jwk),
+        config: { url: "https://ca.example", provisioner: "ops" },
+        subject: "user-1",
+        publicKey: seen.publicKey,
+        principals: ["alice"],
+        keyId: "user-1",
+        validAfter: 1,
+        validBefore: 2,
+    });
+    const [header, body, signature] = token.split(".");
+    const verified = crypto.verify(
+        "sha256",
+        Buffer.from(`${header}.${body}`),
+        publicKey,
+        (() => {
+            const raw = Buffer.from(signature, "base64url");
+            const integer = (value) => {
+                if (value[0] & 0x80) value = Buffer.concat([Buffer.from([0]), value]);
+                return Buffer.concat([Buffer.from([0x02, value.length]), value]);
+            };
+            const rs = Buffer.concat([integer(raw.subarray(0, 32)), integer(raw.subarray(32))]);
+            return Buffer.concat([Buffer.from([0x30, rs.length]), rs]);
+        })(),
+    );
+    assert.equal(verified, true);
+    assert.equal(issued.metadata.idpSubject, "user-1");
+    assert.equal(issued.metadata.ttlSeconds, 300);
 });
 
 const readPublic = (blob) => {

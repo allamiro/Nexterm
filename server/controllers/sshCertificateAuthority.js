@@ -4,6 +4,7 @@ const OrganizationMember = require("../models/OrganizationMember");
 const { hasAccountPermission } = require("../utils/permission");
 const { Permission } = require("../permissions/registry");
 const { publicKeyFromPrivate } = require("../lib/ssh/openssh");
+const { loadProvisionerKey } = require("../lib/ssh/stepToken");
 const { normalizeSourceAddress, asArray } = require("../lib/ssh/principals");
 const logger = require("../utils/logger");
 
@@ -24,6 +25,11 @@ const sanitize = (authority) => {
         sourceAddress: value.sourceAddress || "",
         extraPrincipals: asArray(value.extraPrincipals),
         groupPrincipalMappings: asArray(value.groupPrincipalMappings),
+        selectorGroups: asArray(value.selectorGroups),
+        domains: asArray(value.domains),
+        environments: asArray(value.environments),
+        ttlByGroup: asArray(value.ttlByGroup),
+        ttlByEnvironment: asArray(value.ttlByEnvironment),
         keyIdTemplate: value.keyIdTemplate || "{{username}}",
         config,
         hasSecret: Boolean(value.secret || value.secretEncrypted),
@@ -44,6 +50,16 @@ const validateBackend = (backend, config = {}, secret, { creating }) => {
     }
     if (backend === "vault" && (!config.address || !config.mount || !config.role)) return "Vault address, mount, and role are required";
     if (backend === "step" && !config.url) return "A step-ca URL is required";
+    if (backend === "step" && config.tokenMode === "provisioner") {
+        if (!config.provisioner) return "A step-ca provisioner name is required";
+        if (secret) {
+            try {
+                loadProvisionerKey(secret);
+            } catch (error) {
+                return error.message;
+            }
+        }
+    }
     if (backend === "webhook" && !config.url) return "A webhook URL is required";
     if (creating && backend !== "webhook" && !secret) return "A signing token is required";
     return {};
@@ -94,6 +110,11 @@ const createCertificateAuthority = async (accountId, body) => {
         sourceAddress,
         extraPrincipals: body.extraPrincipals || [],
         groupPrincipalMappings: body.groupPrincipalMappings || [],
+        selectorGroups: body.selectorGroups || [],
+        domains: body.domains || [],
+        environments: body.environments || [],
+        ttlByGroup: body.ttlByGroup || [],
+        ttlByEnvironment: body.ttlByEnvironment || [],
         keyIdTemplate: body.keyIdTemplate || "{{username}}",
         config: applyConfig(body.backend, body.config, body.secret),
         secret: body.secret || null,
@@ -126,6 +147,11 @@ const updateCertificateAuthority = async (accountId, id, body) => {
     if (body.ttlSeconds !== undefined) authority.ttlSeconds = body.ttlSeconds;
     if (body.extraPrincipals !== undefined) authority.extraPrincipals = body.extraPrincipals;
     if (body.groupPrincipalMappings !== undefined) authority.groupPrincipalMappings = body.groupPrincipalMappings;
+    if (body.selectorGroups !== undefined) authority.selectorGroups = body.selectorGroups;
+    if (body.domains !== undefined) authority.domains = body.domains;
+    if (body.environments !== undefined) authority.environments = body.environments;
+    if (body.ttlByGroup !== undefined) authority.ttlByGroup = body.ttlByGroup;
+    if (body.ttlByEnvironment !== undefined) authority.ttlByEnvironment = body.ttlByEnvironment;
     if (body.keyIdTemplate !== undefined) authority.keyIdTemplate = body.keyIdTemplate;
     if (body.config !== undefined || secret) authority.config = applyConfig(backend, body.config, secret, authority.config || {});
     if (secret) authority.secret = secret;

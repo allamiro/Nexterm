@@ -2,6 +2,7 @@ const SshCertificateAuthority = require("../../models/SshCertificateAuthority");
 const { createAuditLog, AUDIT_ACTIONS, RESOURCE_TYPES } = require("../../controllers/audit");
 const { normalizeCertificate } = require("./openssh");
 const { issueForSession } = require("./certificateAuthority");
+const { authorityMatches, selectAuthority } = require("./principals");
 
 const buildSSHParams = (identity, credentials = {}) => {
     const params = { username: identity?.username || credentials.username || "" };
@@ -14,13 +15,26 @@ const buildSSHParams = (identity, credentials = {}) => {
 
 const authorityRecord = (authority) => (authority?.get ? authority.get({ plain: true }) : authority);
 
-const prepareSshAuth = async ({ entry, identity, credentials, account }) => {
-    const params = buildSSHParams(identity, credentials);
+const chooseAuthority = async ({ entry, account }) => {
     const sshCaId = Number(entry?.config?.sshCaId);
-    if (!sshCaId) return params;
+    if (sshCaId) {
+        const authority = await SshCertificateAuthority.findByPk(sshCaId, { raw: false });
+        if (!authority) throw new Error("SSH certificate authority was not found");
+        if (!authorityMatches(authorityRecord(authority), { account, entry })) {
+            throw new Error("SSH certificate authority is not available for this account");
+        }
+        return authority;
+    }
 
-    const authority = await SshCertificateAuthority.findByPk(sshCaId, { raw: false });
-    if (!authority) throw new Error("SSH certificate authority was not found");
+    const authorities = await SshCertificateAuthority.findAll({ where: { enabled: true }, raw: false });
+    const chosen = selectAuthority(authorities.map(authorityRecord), { account, entry });
+    return chosen ? authorities.find((authority) => authority.id === chosen.id) : null;
+};
+
+const prepareSshAuth = async ({ entry, identity, credentials, account, session }) => {
+    const params = buildSSHParams(identity, credentials);
+    const authority = await chooseAuthority({ entry, account });
+    if (!authority) return params;
 
     const issued = await issueForSession({
         ca: { ...authorityRecord(authority), secret: undefined },
@@ -30,6 +44,7 @@ const prepareSshAuth = async ({ entry, identity, credentials, account }) => {
         entry,
     });
 
+    if (session) session.sshCertificate = issued.metadata;
     if (account?.id) {
         await createAuditLog({
             accountId: account.id,

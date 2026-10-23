@@ -21,7 +21,13 @@ const emptyForm = () => ({
     sourceAddress: "",
     extraPrincipals: "",
     groupMappings: "",
+    selectorGroups: "",
+    domains: "",
+    environments: "",
+    ttlByGroup: "",
+    ttlByEnvironment: "",
     keyIdTemplate: "{{username}}",
+    provisioner: "",
     address: "",
     mount: "ssh",
     role: "",
@@ -32,6 +38,7 @@ const emptyForm = () => ({
 });
 
 const formatMappings = (mappings) => (mappings || []).map((mapping) => `${mapping.group}=${(mapping.principals || []).join(",")}`).join("\n");
+const formatTtl = (items, key) => (items || []).map((item) => `${item[key]}=${item.ttlSeconds}`).join("\n");
 
 const parseList = (value) => String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
 
@@ -54,7 +61,13 @@ const formFromAuthority = (authority) => ({
     sourceAddress: authority.sourceAddress || "",
     extraPrincipals: (authority.extraPrincipals || []).join(", "),
     groupMappings: formatMappings(authority.groupPrincipalMappings),
+    selectorGroups: (authority.selectorGroups || []).join(", "),
+    domains: (authority.domains || []).join(", "),
+    environments: (authority.environments || []).join(", "),
+    ttlByGroup: formatTtl(authority.ttlByGroup, "group"),
+    ttlByEnvironment: formatTtl(authority.ttlByEnvironment, "environment"),
     keyIdTemplate: authority.keyIdTemplate || "{{username}}",
+    provisioner: authority.config?.provisioner || "",
     address: authority.config?.address || "",
     mount: authority.config?.mount || "ssh",
     role: authority.config?.role || "",
@@ -107,8 +120,20 @@ export const SshCertificates = () => {
     const save = async (event) => {
         event.preventDefault();
         let groupPrincipalMappings = [];
+        let ttlByGroup = [];
+        let ttlByEnvironment = [];
         try {
             groupPrincipalMappings = parseMappings(form.groupMappings);
+            ttlByGroup = String(form.ttlByGroup || "").split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
+                const separator = line.indexOf("=");
+                if (separator <= 0) throw new Error(line);
+                return { group: line.slice(0, separator).trim(), ttlSeconds: Number(line.slice(separator + 1)) };
+            });
+            ttlByEnvironment = String(form.ttlByEnvironment || "").split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
+                const separator = line.indexOf("=");
+                if (separator <= 0) throw new Error(line);
+                return { environment: line.slice(0, separator).trim(), ttlSeconds: Number(line.slice(separator + 1)) };
+            });
         } catch {
             sendToast("Error", t("settings.sshCertificates.mappingInvalid"));
             return;
@@ -123,11 +148,16 @@ export const SshCertificates = () => {
             sourceAddress: form.sourceAddress.trim(),
             extraPrincipals: parseList(form.extraPrincipals),
             groupPrincipalMappings,
+            selectorGroups: parseList(form.selectorGroups),
+            domains: parseList(form.domains),
+            environments: parseList(form.environments),
+            ttlByGroup,
+            ttlByEnvironment,
             keyIdTemplate: form.keyIdTemplate.trim() || "{{username}}",
             config: form.backend === "vault"
                 ? { address: form.address.trim(), mount: form.mount.trim(), role: form.role.trim(), namespace: form.namespace.trim() }
                 : form.backend === "step"
-                    ? { url: form.url.trim(), tokenMode: form.tokenMode }
+                    ? { url: form.url.trim(), tokenMode: form.tokenMode, provisioner: form.provisioner.trim() }
                     : form.backend === "webhook"
                         ? { url: form.url.trim() }
                         : {},
@@ -225,6 +255,26 @@ export const SshCertificates = () => {
                         <textarea id="ca-groups" value={form.groupMappings} onChange={(event) => update("groupMappings")(event.target.value)} placeholder={"linux-admins=root,ubuntu"} />
                     </div>
                     <div className="form-group">
+                        <label htmlFor="ca-selector">{t("settings.sshCertificates.fields.selectorGroups")}</label>
+                        <Input id="ca-selector" icon={mdiFormTextbox} value={form.selectorGroups} setValue={update("selectorGroups")} placeholder="linux-admins, dba" />
+                    </div>
+                    <div className="form-group">
+                        <label htmlFor="ca-domains">{t("settings.sshCertificates.fields.domains")}</label>
+                        <Input id="ca-domains" icon={mdiFormTextbox} value={form.domains} setValue={update("domains")} placeholder="corp.example" />
+                    </div>
+                    <div className="form-group">
+                        <label htmlFor="ca-environments">{t("settings.sshCertificates.fields.environments")}</label>
+                        <Input id="ca-environments" icon={mdiFormTextbox} value={form.environments} setValue={update("environments")} placeholder="production" />
+                    </div>
+                    <div className="form-group">
+                        <label htmlFor="ca-ttl-group">{t("settings.sshCertificates.fields.ttlByGroup")}</label>
+                        <textarea id="ca-ttl-group" value={form.ttlByGroup} onChange={(event) => update("ttlByGroup")(event.target.value)} placeholder={"linux-admins=900"} />
+                    </div>
+                    <div className="form-group">
+                        <label htmlFor="ca-ttl-env">{t("settings.sshCertificates.fields.ttlByEnvironment")}</label>
+                        <textarea id="ca-ttl-env" value={form.ttlByEnvironment} onChange={(event) => update("ttlByEnvironment")(event.target.value)} placeholder={"production=300"} />
+                    </div>
+                    <div className="form-group">
                         <label htmlFor="ca-keyid">{t("settings.sshCertificates.fields.keyId")}</label>
                         <Input id="ca-keyid" icon={mdiFormTextbox} value={form.keyIdTemplate} setValue={update("keyIdTemplate")} />
                     </div>
@@ -244,11 +294,18 @@ export const SshCertificates = () => {
                             <SelectBox selected={form.tokenMode} setSelected={update("tokenMode")} options={[
                                 { label: t("settings.sshCertificates.tokenModes.ott"), value: "ott" },
                                 { label: t("settings.sshCertificates.tokenModes.bearer"), value: "bearer" },
+                                { label: t("settings.sshCertificates.tokenModes.provisioner"), value: "provisioner" },
                             ]} />
                         </div>
                     )}
+                    {form.backend === "step" && form.tokenMode === "provisioner" && (
+                        <div className="form-group">
+                            <label htmlFor="ca-provisioner">{t("settings.sshCertificates.fields.provisioner")}</label>
+                            <Input id="ca-provisioner" icon={mdiFormTextbox} value={form.provisioner} setValue={update("provisioner")} />
+                        </div>
+                    )}
                     <div className="form-group">
-                        <label htmlFor="ca-secret">{form.backend === "local" ? t("settings.sshCertificates.fields.caKey") : t("settings.sshCertificates.fields.token")}</label>
+                        <label htmlFor="ca-secret">{form.backend === "local" || form.tokenMode === "provisioner" ? t("settings.sshCertificates.fields.caKey") : t("settings.sshCertificates.fields.token")}</label>
                         <textarea id="ca-secret" value={form.secret} onChange={(event) => update("secret")(event.target.value)} placeholder={editing ? t("settings.sshCertificates.fields.secretKeep") : ""} />
                     </div>
                     <div className="toggle-row">

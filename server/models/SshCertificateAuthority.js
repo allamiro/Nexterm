@@ -27,6 +27,11 @@ module.exports = db.define("ssh_certificate_authorities", {
     sourceAddress: { type: Sequelize.STRING, allowNull: true },
     extraPrincipals: { type: Sequelize.JSON, allowNull: false, defaultValue: [] },
     groupPrincipalMappings: { type: Sequelize.JSON, allowNull: false, defaultValue: [] },
+    selectorGroups: { type: Sequelize.JSON, allowNull: false, defaultValue: [] },
+    domains: { type: Sequelize.JSON, allowNull: false, defaultValue: [] },
+    environments: { type: Sequelize.JSON, allowNull: false, defaultValue: [] },
+    ttlByGroup: { type: Sequelize.JSON, allowNull: false, defaultValue: [] },
+    ttlByEnvironment: { type: Sequelize.JSON, allowNull: false, defaultValue: [] },
     keyIdTemplate: { type: Sequelize.STRING, allowNull: false, defaultValue: "{{username}}" },
     config: { type: Sequelize.JSON, allowNull: false, defaultValue: {} },
     secret: { type: Sequelize.VIRTUAL, allowNull: true },
@@ -58,6 +63,11 @@ module.exports = db.define("ssh_certificate_authorities", {
                 if (!authority) return;
                 authority.extraPrincipals = parseJson(authority.extraPrincipals, []);
                 authority.groupPrincipalMappings = parseJson(authority.groupPrincipalMappings, []);
+                authority.selectorGroups = parseJson(authority.selectorGroups, []);
+                authority.domains = parseJson(authority.domains, []);
+                authority.environments = parseJson(authority.environments, []);
+                authority.ttlByGroup = parseJson(authority.ttlByGroup, []);
+                authority.ttlByEnvironment = parseJson(authority.ttlByEnvironment, []);
                 authority.config = parseJson(authority.config, {});
                 if (!authority.secretEncrypted) return;
                 try {

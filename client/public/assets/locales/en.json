@@ -623,7 +623,8 @@
       },
       "tokenModes": {
         "ott": "One-time token",
-        "bearer": "Bearer token"
+        "bearer": "Bearer token",
+        "provisioner": "Provisioner key"
       },
       "fields": {
         "name": "Name",
@@ -635,7 +636,13 @@
         "sourceAddressPlaceholder": "Engine address, for example 10.0.0.8/32",
         "extraPrincipals": "Extra principals",
         "groupMappings": "Group to principal mappings",
+        "selectorGroups": "Limit to groups",
+        "domains": "Limit to domains",
+        "environments": "Limit to environments",
+        "ttlByGroup": "Lifetime by group",
+        "ttlByEnvironment": "Lifetime by environment",
         "keyId": "Key ID template",
+        "provisioner": "Provisioner name",
         "address": "Vault address",
         "mount": "Mount",
         "role": "Role",
@@ -1822,8 +1829,11 @@
         },
         "sshCertificate": {
           "authority": "SSH certificate authority",
-          "none": "Use the identity key",
-          "description": "When set, each connection gets a new short-lived SSH certificate. The private key stays in memory for that session."
+          "none": "Choose automatically",
+          "description": "Leave this empty to use an authority that matches the account group, domain, or environment. A selected authority is used for every connection to this server.",
+          "domain": "Directory domain",
+          "environment": "Environment",
+          "ttl": "Certificate lifetime override (seconds)"
         },
         "noSettings": "No additional settings available for this entry type."
       },

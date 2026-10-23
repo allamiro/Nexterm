@@ -42,6 +42,10 @@ module.exports = db.define("accounts", {
         allowNull: false,
         defaultValue: [],
     },
+    idpSubject: {
+        type: Sequelize.STRING,
+        allowNull: true,
+    },
     avatarHash: {
         type: Sequelize.STRING,
         allowNull: true,

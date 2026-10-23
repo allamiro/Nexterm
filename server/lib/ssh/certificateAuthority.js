@@ -5,7 +5,8 @@ const {
     describeCertificate,
     normalizeCertificate,
 } = require("./openssh");
-const { resolvePrincipals, renderKeyId, clampTtl, normalizeSourceAddress, asArray } = require("./principals");
+const { resolvePrincipals, renderKeyId, normalizeSourceAddress, asArray, resolveTtl } = require("./principals");
+const { mintStepSshToken } = require("./stepToken");
 
 const safeMessage = (message) => String(message || "SSH certificate request failed")
     .replace(/-----BEGIN[\s\S]*?-----END[^-]+-----/g, "[redacted]")
@@ -106,6 +107,9 @@ const signWithBackend = async ({ ca, secret, publicKey, principals, keyId, ttlSe
         const endpoint = new URL("/ssh/sign", url);
         const tokenMode = ca.config?.tokenMode || "ott";
         const headers = tokenMode === "bearer" ? { authorization: `Bearer ${secret}` } : {};
+        const ott = tokenMode === "provisioner"
+            ? mintStepSshToken({ secret, config: ca.config, subject: ca.subject, publicKey, principals, keyId, validAfter, validBefore })
+            : secret;
         const payload = await postJson(fetchImpl, endpoint, {
             headers,
             body: {
@@ -115,7 +119,7 @@ const signWithBackend = async ({ ca, secret, publicKey, principals, keyId, ttlSe
                 principals,
                 validAfter: new Date(validAfter * 1000).toISOString(),
                 validBefore: new Date(validBefore * 1000).toISOString(),
-                ...(tokenMode === "ott" ? { ott: secret } : {}),
+                ...(tokenMode === "bearer" ? {} : { ott }),
             },
         });
         return certificateFromPayload(payload);
@@ -160,10 +164,11 @@ const issueForSession = async ({ ca, secret, identity, account, entry, fetchImpl
     const keyId = renderKeyId(ca.keyIdTemplate, {
         username,
         account: account?.username || "",
+        subject: account?.idpSubject || "",
         server: entry?.name || "",
         host: entry?.config?.ip || "",
     });
-    const ttlSeconds = clampTtl(ca.ttlSeconds);
+    const ttlSeconds = resolveTtl({ ca, account, entry });
     const now = Math.floor(Date.now() / 1000);
     const validAfter = now - 30;
     const validBefore = now + ttlSeconds;
@@ -173,7 +178,7 @@ const issueForSession = async ({ ca, secret, identity, account, entry, fetchImpl
     let certificate;
     try {
         certificate = await signWithBackend({
-        ca: { ...ca, config: ca.config || {}, extraPrincipals: asArray(ca.extraPrincipals) },
+        ca: { ...ca, config: ca.config || {}, extraPrincipals: asArray(ca.extraPrincipals), subject: account?.idpSubject || account?.username || username },
         secret,
         publicKey: pair.publicKey,
         rawPublic: pair.rawPublic,
@@ -214,8 +219,13 @@ const issueForSession = async ({ ca, secret, identity, account, entry, fetchImpl
             sourceAddress: described.sourceAddress || sourceAddress,
             identityId: identity?.id || null,
             identityName: identity?.name || null,
+            account: account?.username || null,
+            idpSubject: account?.idpSubject || null,
             entryId: entry?.id || null,
+            server: entry?.name || null,
             host: entry?.config?.ip || null,
+            ttlSeconds,
+            startedAt: new Date().toISOString(),
         },
     };
 };

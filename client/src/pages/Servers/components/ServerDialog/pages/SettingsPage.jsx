@@ -1,10 +1,11 @@
 import { useContext, useEffect, useState } from "react";
 import { getRequest } from "@/common/utils/RequestUtil.js";
 import SelectBox from "@/common/components/SelectBox";
+import Input from "@/common/components/IconInput";
 import ToggleSwitch from "@/common/components/ToggleSwitch";
 import { ServerContext } from "@/common/contexts/ServerContext.jsx";
 import Icon from "@mdi/react";
-import { mdiServerNetwork, mdiClose, mdiPlus, mdiChartLine, mdiMonitor, mdiPalette, mdiVolumeHigh, mdiPowerPlug, mdiKeyboardOutline, mdiShieldLock } from "@mdi/js";
+import { mdiServerNetwork, mdiClose, mdiPlus, mdiChartLine, mdiMonitor, mdiPalette, mdiVolumeHigh, mdiPowerPlug, mdiKeyboardOutline, mdiShieldLock, mdiFormTextbox, mdiTimerOutline } from "@mdi/js";
 import { useTranslation } from "react-i18next";
 
 const COLOR_DEPTHS = [
@@ -203,6 +204,24 @@ const SettingsPage = ({ config, setConfig, monitoringEnabled, setMonitoringEnabl
                         ]}
                     />
                     <span className="jump-hosts-description">{t("servers.dialog.settings.sshCertificate.description")}</span>
+                </div>
+            )}
+            {showSshCertificate && (
+                <div className="form-group">
+                    <label htmlFor="ssh-domain">{t("servers.dialog.settings.sshCertificate.domain")}</label>
+                    <Input id="ssh-domain" icon={mdiFormTextbox} value={config?.domain || ""} setValue={(value) => setConfig((prev) => ({ ...prev, domain: value }))} />
+                </div>
+            )}
+            {showSshCertificate && (
+                <div className="form-group">
+                    <label htmlFor="ssh-environment">{t("servers.dialog.settings.sshCertificate.environment")}</label>
+                    <Input id="ssh-environment" icon={mdiFormTextbox} value={config?.environment || ""} setValue={(value) => setConfig((prev) => ({ ...prev, environment: value }))} />
+                </div>
+            )}
+            {showSshCertificate && (
+                <div className="form-group">
+                    <label htmlFor="ssh-ttl">{t("servers.dialog.settings.sshCertificate.ttl")}</label>
+                    <Input id="ssh-ttl" icon={mdiTimerOutline} value={config?.sshCertTtl ? String(config.sshCertTtl) : ""} setValue={(value) => setConfig((prev) => ({ ...prev, sshCertTtl: value ? Number(value) : null }))} />
                 </div>
             )}
             {showJumpHosts && (

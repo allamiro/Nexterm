@@ -12,7 +12,7 @@ A certificate is optional. A server that requires certificate authentication wil
 
 ## Short-lived certificates
 
-An administrator creates a certificate authority under Settings → SSH Certificates. It can apply to every server or to one organization. A server's settings can then select that authority. When the server is selected, the next SSH, SFTP, tunnel, or remote-browser connection does this:
+An administrator creates a certificate authority under Settings → SSH Certificates. It can apply to every server or to one organization, and it can be limited to account groups, a directory domain, or an environment. A server can select one authority directly. When it does not, Nexterm uses the most specific enabled authority that matches the signed-in account and the server. When the server is selected, the next SSH, SFTP, tunnel, or remote-browser connection does this:
 
 1. Generate an Ed25519 key for that connection.
 2. Build the principal list from the identity username, extra principals on the authority, and group mappings.
@@ -20,7 +20,15 @@ An administrator creates a certificate authority under Settings → SSH Certific
 4. Authenticate with that key and certificate instead of the stored key or password.
 5. Record the authority, key id, serial, principals, validity, and source address. The private key is not recorded.
 
-Group mappings use the groups saved from the last OpenID Connect login. A mapping line `linux-admins=root,ubuntu` adds those principals when the signed-in account has the group `linux-admins`. The identity username is always included.
+Group mappings use the groups and subject saved from the last OpenID Connect login. Keycloak, AD FS, and Entra ID are connected through that login, including a directory that the identity provider federates. A mapping line `linux-admins=root,ubuntu` adds those principals when the signed-in account has the group `linux-admins`. The identity username is always included.
+
+The certificate lifetime is the server override when one is set. Otherwise it is the shortest matching group lifetime, then the environment lifetime, then the authority default. The key id template also accepts `{{subject}}`.
+
+A step-ca authority can store a one-time token, a bearer token, or the P-256 private key of a JWK provisioner. With a provisioner key, Nexterm mints the short-lived sign-in token for that connection. The provisioner name is the name configured on step-ca.
+
+A local authority accepts an unencrypted Ed25519, ECDSA, or RSA private key in OpenSSH or PKCS#8 form. The session key is always Ed25519. Vault, step-ca, and webhooks can return other certificate types.
+
+Each connection is signed when it starts. The audit entry records the account, identity provider subject, server, principals, key id, serial, lifetime, and start time. When the session closes, a second entry records the end time. The private key is not recorded. OpenSSH checks the certificate when the session authenticates, so the next connection receives a new certificate.
 
 The source address, when set, becomes the certificate's `source-address` restriction. That address is the address the SSH server sees, which is the engine's address, not the browser's address. Leave it empty when the engine address changes.
 
@@ -28,9 +36,9 @@ Supported authorities:
 
 | Backend | What Nexterm stores | Request |
 | --- | --- | --- |
-| Local CA key | Unencrypted Ed25519 OpenSSH or PKCS#8 private key | Signed inside Nexterm |
+| Local CA key | Unencrypted Ed25519, ECDSA, or RSA OpenSSH or PKCS#8 private key | Signed inside Nexterm |
 | Vault SSH | Address, mount, role, and token | `POST /v1/{mount}/sign/{role}` |
-| step-ca | URL and either a one-time token or a bearer token | `POST /ssh/sign` |
+| step-ca | URL and a one-time token, bearer token, or P-256 provisioner key | `POST /ssh/sign` |
 | Webhook | URL and optional bearer token | JSON shown below |
 
 Webhook body:
@@ -50,16 +58,8 @@ Webhook body:
 
 The response is JSON with `certificate`, `crt`, or `signed_key`, or the certificate text itself. Lifetime is limited to between 30 seconds and 24 hours. The default is 5 minutes.
 
-The key id template accepts `{{username}}`, `{{account}}`, `{{server}}`, and `{{host}}`.
+The key id template accepts `{{username}}`, `{{account}}`, `{{subject}}`, `{{server}}`, and `{{host}}`.
 
-An authority with an organization can only sign for servers in that organization. An authority without an organization can sign for any server.
+An authority with an organization can only sign for servers in that organization. An authority without an organization can sign for any server. An authority that is not limited by organization, group, domain, or environment is used only when a server selects it.
 
-Linux hosts still need `TrustedUserCAKeys` pointing at the authority's public key. Nexterm does not change host configuration.
-
-## What is not included yet
-
-- Choosing an authority from the account's groups. The server setting chooses the authority.
-- Minting step-ca tokens. The authority stores a token that step-ca already accepts.
-- Refreshing a certificate after the session has authenticated. OpenSSH checks the certificate at login.
-- SAML group claims. Group mappings read the groups stored for OpenID Connect accounts.
-- Signing with a local CA key that is not Ed25519. Vault, step-ca, and webhooks can return other certificate types.
+Linux hosts still need `TrustedUserCAKeys` pointing at the authority's public key. Nexterm does not change host configuration, and it does not replace the identity provider's own authentication. A security key, passkey, or smart card is enforced by that provider before Nexterm sees the account.

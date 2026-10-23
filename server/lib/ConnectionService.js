@@ -136,14 +136,14 @@ const createConnectionForSession = async (sessionId, accountId) => {
     }
 };
 
-const resolveFileTransferContext = async (entry, identityId, directIdentity, accountId) => {
+const resolveFileTransferContext = async (entry, identityId, directIdentity, accountId, session = null) => {
     const identityResult = await resolveIdentity(entry, identityId, directIdentity, accountId);
     const identity = extractIdentity(identityResult);
     const credentials = await resolveCredentials(identity);
     const protocol = getEntryProtocol(entry);
     const { host, port } = getHostPort(entry, FILE_TRANSFER_PORTS[protocol] ?? 22);
     const account = await loadAccount(accountId);
-    const params = await prepareSshAuth({ entry, identity, credentials, account });
+    const params = await prepareSshAuth({ entry, identity, credentials, account, session });
     if (protocol) params.protocol = protocol;
     return { identity, credentials, host, port, params };
 };
@@ -156,7 +156,7 @@ const createSFTPConnectionForSession = async (sessionId, entry, accountId) => {
     session._connecting = (async () => {
         requireEngine();
         const { identityId, directIdentity } = session.configuration;
-        const { host, port, params } = await resolveFileTransferContext(entry, identityId, directIdentity, accountId);
+        const { host, port, params } = await resolveFileTransferContext(entry, identityId, directIdentity, accountId, session);
         const jumpHosts = await resolveJumpHosts(entry, await loadAccount(accountId));
 
         const dataSocket = await openEngineSession(
@@ -261,7 +261,7 @@ const createSSHConnectionForSession = async (sessionId, entry, identity, organiz
         const credentials = await resolveCredentials(identity);
         const { host, port } = getHostPort(entry);
         const account = await loadAccount(session.accountId);
-        const params = await prepareSshAuth({ entry, identity, credentials, account });
+        const params = await prepareSshAuth({ entry, identity, credentials, account, session });
         const jumpHosts = await resolveJumpHosts(entry, account);
 
         const dataSocket = await openEngineSession(
@@ -426,7 +426,7 @@ const prepareWebSession = async (sessionId, entry, identity, organizationId) => 
     const credentials = await resolveCredentials(identity);
     const { host, port } = getHostPort(entry);
     const account = await loadAccount(session.accountId);
-    const params = await prepareSshAuth({ entry, identity, credentials, account });
+    const params = await prepareSshAuth({ entry, identity, credentials, account, session });
     const jumpHosts = await resolveJumpHosts(entry, account);
 
     const { dataSocket, result } = await openEngineSessionWithResult(
