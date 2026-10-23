@@ -384,16 +384,27 @@ const certificateLine = (text) => String(text || "")
     .map((line) => line.trim())
     .find((line) => line && !line.startsWith("#"));
 
+const certificateFromBlob = (blob) => {
+    const decoded = Buffer.from(blob, "base64");
+    if (!decoded.length) throw new Error("SSH certificate is malformed");
+    const type = readString(decoded, 0).value.toString();
+    if (!CERT_TYPES.has(type)) throw new Error("SSH certificate is not an OpenSSH user certificate");
+    return `${type} ${blob}`;
+};
+
 const normalizeCertificate = (text) => {
     const line = certificateLine(text);
     if (!line) throw new Error("SSH certificate is empty");
     const match = /^(\S+)\s+([A-Za-z0-9+/=]+)(?:\s+(\S+))?$/.exec(line);
-    if (!match || !CERT_TYPES.has(match[1])) throw new Error("SSH certificate is not an OpenSSH user certificate");
-    const decoded = Buffer.from(match[2], "base64");
-    if (!decoded.length) throw new Error("SSH certificate is malformed");
-    const type = readString(decoded, 0);
-    if (type.value.toString() !== match[1]) throw new Error("SSH certificate is malformed");
-    return match[3] ? `${match[1]} ${match[2]} ${match[3]}` : `${match[1]} ${match[2]}`;
+    if (match && CERT_TYPES.has(match[1])) {
+        const decoded = Buffer.from(match[2], "base64");
+        if (!decoded.length) throw new Error("SSH certificate is malformed");
+        const type = readString(decoded, 0);
+        if (type.value.toString() !== match[1]) throw new Error("SSH certificate is malformed");
+        return match[3] ? `${match[1]} ${match[2]} ${match[3]}` : `${match[1]} ${match[2]}`;
+    }
+    if (/^[A-Za-z0-9+/=]+$/.test(line)) return certificateFromBlob(line);
+    throw new Error("SSH certificate is not an OpenSSH user certificate");
 };
 
 const readNameList = (buffer) => {

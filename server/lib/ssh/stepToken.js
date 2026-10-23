@@ -41,16 +41,27 @@ const signAudience = (config) => {
 };
 
 const publicKeyFingerprint = (publicKey) => {
-    const blob = String(publicKey || "").trim().split(/\s+/)[1];
+    const fields = String(publicKey || "").trim().split(/\s+/);
+    const blob = fields.length >= 2 ? fields[1] : fields[0];
     if (!blob) throw new Error("SSH public key is invalid");
     return crypto.createHash("sha256").update(Buffer.from(blob, "base64")).digest("base64");
 };
 
+const provisionerKid = (secret, key) => {
+    const trimmed = String(secret || "").trim();
+    if (trimmed.startsWith("{")) {
+        const parsed = JSON.parse(trimmed);
+        if (parsed.kid) return String(parsed.kid);
+    }
+    const jwk = key.export({ format: "jwk" });
+    const canonical = JSON.stringify({ crv: jwk.crv, kty: jwk.kty, x: jwk.x, y: jwk.y });
+    return crypto.createHash("sha256").update(canonical).digest("base64url");
+};
+
 const mintStepSshToken = ({ secret, config, subject, publicKey, principals, keyId, validAfter, validBefore }) => {
     const key = loadProvisionerKey(secret);
-    const jwk = key.export({ format: "jwk" });
     const now = Math.floor(Date.now() / 1000);
-    const header = { alg: "ES256", typ: "JWT", ...(jwk.kid ? { kid: jwk.kid } : {}) };
+    const header = { alg: "ES256", typ: "JWT", kid: provisionerKid(secret, key) };
     const payload = {
         aud: signAudience(config),
         iss: config.provisioner,

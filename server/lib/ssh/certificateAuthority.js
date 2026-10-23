@@ -88,9 +88,17 @@ const signLocal = ({ secret, rawPublic, keyId, principals, serial, validAfter, v
     sourceAddress,
 });
 
+const trimSlashes = (value) => {
+    let start = 0;
+    let end = value.length;
+    while (start < end && value[start] === "/") start += 1;
+    while (end > start && value[end - 1] === "/") end -= 1;
+    return value.slice(start, end);
+};
+
 const signVault = async ({ ca, secret, publicKey, principals, keyId, ttlSeconds, sourceAddress, fetchImpl }) => {
     const address = assertHttpUrl(ca.config?.address, "Vault address");
-    const mount = String(ca.config?.mount || "ssh").replace(/^\/+|\/+$/g, "");
+    const mount = trimSlashes(String(ca.config?.mount || "ssh"));
     const role = ca.config?.role;
     if (!mount || !role) throw new Error("Vault mount and role are required");
     const url = new URL(`/v1/${mount}/sign/${encodeURIComponent(role)}`, address);
@@ -107,12 +115,19 @@ const signVault = async ({ ca, secret, publicKey, principals, keyId, ttlSeconds,
     return certificateFromPayload(await postJson(fetchImpl, url, { headers, body }));
 };
 
+const stepPublicKey = (publicKey) => {
+    const fields = String(publicKey || "").trim().split(/\s+/);
+    const blob = fields.length >= 2 ? fields[1] : fields[0];
+    if (!blob) throw new Error("SSH public key is invalid");
+    return blob;
+};
+
 const signStep = async ({ ca, secret, publicKey, principals, keyId, validAfter, validBefore, fetchImpl }) => {
     const endpoint = new URL("/ssh/sign", assertHttpUrl(ca.config?.url, "step-ca URL"));
     const tokenMode = ca.config?.tokenMode || "ott";
     const headers = {};
     const body = {
-        publicKey,
+        publicKey: stepPublicKey(publicKey),
         certType: "user",
         keyId,
         principals,

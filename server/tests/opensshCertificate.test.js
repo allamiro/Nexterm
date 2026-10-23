@@ -29,7 +29,7 @@ const sshKeygen = () => {
 
 test("generates an OpenSSH key that ssh-keygen can read", (t) => {
     if (!sshKeygen()) {
-        t.skip();
+        t.skip("OpenSSH ssh-keygen is not available");
         return;
     }
     const pair = generateEd25519KeyPair("session");
@@ -183,7 +183,7 @@ test("signs with an RSA CA key", () => {
 
 test("reads an OpenSSH ECDSA CA key", (t) => {
     if (!sshKeygen()) {
-        t.skip();
+        t.skip("OpenSSH ssh-keygen is not available");
         return;
     }
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nexterm-ca-"));
@@ -215,11 +215,12 @@ test("selects an authority from group, domain, and environment and applies the l
 test("mints a step-ca provisioner token and sends it to the signer", async () => {
     const { privateKey, publicKey } = crypto.generateKeyPairSync("ec", { namedCurve: "prime256v1" });
     const jwk = privateKey.export({ format: "jwk" });
+    jwk.kid = "ops-key";
     const caKey = generateEd25519KeyPair("ca");
     let seen;
     const fetchImpl = async (_url, options) => {
         seen = JSON.parse(options.body);
-        const userPublic = Buffer.from(seen.publicKey.split(" ")[1], "base64");
+        const userPublic = Buffer.from(seen.publicKey, "base64");
         const { value: rawPublic } = readPublic(userPublic);
         const certificate = signUserCertificate({
             caPrivateKey: caKey.privateKey,
@@ -230,7 +231,7 @@ test("mints a step-ca provisioner token and sends it to the signer", async () =>
             validAfter: Math.floor(Date.parse(seen.validAfter) / 1000),
             validBefore: Math.floor(Date.parse(seen.validBefore) / 1000),
         });
-        return { ok: true, text: async () => JSON.stringify({ certificate }) };
+        return { ok: true, text: async () => JSON.stringify({ crt: certificate.split(/\s+/)[1] }) };
     };
 
     const issued = await issueForSession({
@@ -252,9 +253,12 @@ test("mints a step-ca provisioner token and sends it to the signer", async () =>
         fetchImpl,
     });
 
-    const [, payload] = seen.ott.split(".");
+    const [encodedHeader, payload] = seen.ott.split(".");
+    const header = JSON.parse(Buffer.from(encodedHeader, "base64url").toString());
     const claims = JSON.parse(Buffer.from(payload, "base64url").toString());
+    assert.equal(header.kid, "ops-key");
     assert.equal(claims.iss, "ops");
+    assert.match(issued.certificate, /^ssh-ed25519-cert-v01@openssh.com /);
     assert.equal(claims.aud, "https://ca.example/ssh/sign");
     assert.equal(claims.sub, "user-1");
     assert.deepEqual(claims.step.ssh.principals, ["alice"]);
@@ -268,10 +272,10 @@ test("mints a step-ca provisioner token and sends it to the signer", async () =>
         validAfter: 1,
         validBefore: 2,
     });
-    const [header, body, signature] = token.split(".");
+    const [tokenHeader, tokenBody, signature] = token.split(".");
     const verified = crypto.verify(
         "sha256",
-        Buffer.from(`${header}.${body}`),
+        Buffer.from(`${tokenHeader}.${tokenBody}`),
         publicKey,
         (() => {
             const raw = Buffer.from(signature, "base64url");

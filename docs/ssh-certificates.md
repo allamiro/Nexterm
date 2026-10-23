@@ -24,7 +24,7 @@ Group mappings use the groups and subject saved from the last OpenID Connect log
 
 The certificate lifetime is the server override when one is set. Otherwise it is the shortest matching group lifetime, then the environment lifetime, then the authority default. The key id template also accepts `{{subject}}`.
 
-A step-ca authority can store a one-time token, a bearer token, or the P-256 private key of a JWK provisioner. With a provisioner key, Nexterm mints the short-lived sign-in token for that connection. The provisioner name is the name configured on step-ca.
+A step-ca authority can store a one-time token, a bearer token, or the P-256 private key of a JWK provisioner. With a provisioner key, Nexterm mints the short-lived sign-in token for that connection. The provisioner name is the name configured on step-ca. The token carries that key's `kid` when the stored key has one, and otherwise the public-key thumbprint step-ca uses as the key id.
 
 A local authority accepts an unencrypted Ed25519, ECDSA, or RSA private key in OpenSSH or PKCS#8 form. The session key is always Ed25519. Vault, step-ca, and webhooks can return other certificate types.
 
