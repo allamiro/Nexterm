@@ -229,6 +229,7 @@ module.exports.handleOIDCCallback = async (query, userInfo) => {
         }
 
         const account = await upsertOIDCAccount(String(username), String(firstName), String(lastName));
+        await Account.update({ oidcGroups: groups }, { where: { id: account.id } });
 
         if (provider.groupsAttribute) {
             await syncOrganizationMemberships(account.id, groups, provider);

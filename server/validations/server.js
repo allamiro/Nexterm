@@ -10,6 +10,7 @@ const configValidation = Joi.object({
     vmid: Joi.alternatives().try(Joi.string(), Joi.number()).optional(),
     rdpSecurity: Joi.string().valid("any", "nla", "tls", "rdp", "vmconnect").allow("").optional(),
     jumpHosts: Joi.array().items(Joi.number()).optional(),
+    sshCaId: Joi.number().integer().allow(null).optional(),
     macAddress: Joi.string().pattern(/^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/).allow("").optional(),
     wakeOnLanEnabled: Joi.boolean().optional(),
     wolBroadcastAddress: Joi.string().ip({ version: ['ipv4'] }).allow("").optional(),

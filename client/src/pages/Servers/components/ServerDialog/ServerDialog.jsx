@@ -53,6 +53,7 @@ export const ServerDialog = ({ open, onClose, currentFolderId, currentOrganizati
         if (!identity.passphraseTouched && normalized.passphrase === "") normalized.passphrase = undefined;
         
         if (normalized.sshKey === null) normalized.sshKey = undefined;
+        if (normalized.sshCertificate === null) normalized.sshCertificate = undefined;
         return normalized;
     };
 
@@ -78,11 +79,13 @@ export const ServerDialog = ({ open, onClose, currentFolderId, currentOrganizati
                 payload.password = identity.password;
             }
             payload.sshKey = identity.sshKey;
+            if (identity.sshCertificate !== undefined) payload.sshCertificate = identity.sshCertificate;
             if (hasPassphrase) {
                 payload.passphrase = identity.passphrase;
             }
         } else {
             payload.sshKey = identity.sshKey;
+            if (identity.sshCertificate !== undefined) payload.sshCertificate = identity.sshCertificate;
             if (hasPassphrase) {
                 payload.passphrase = identity.passphrase;
             }
@@ -348,7 +351,8 @@ export const ServerDialog = ({ open, onClose, currentFolderId, currentOrganizati
                     {tabs.find((tab, idx) => idx === activeTab && tab.key === "settings") && 
                         <SettingsPage config={config} setConfig={setConfig}
                                       monitoringEnabled={monitoringEnabled} setMonitoringEnabled={setMonitoringEnabled}
-                                      fieldConfig={fieldConfig} editServerId={editServerId} />}
+                                      fieldConfig={fieldConfig} editServerId={editServerId}
+                                      organizationId={currentOrganizationId} />}
                 </form>
 
                 <Button className="server-dialog-button" onClick={handleSubmit}

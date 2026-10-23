@@ -37,6 +37,11 @@ module.exports = db.define("accounts", {
         type: Sequelize.JSON,
         defaultValue: {},
     },
+    oidcGroups: {
+        type: Sequelize.JSON,
+        allowNull: false,
+        defaultValue: [],
+    },
     avatarHash: {
         type: Sequelize.STRING,
         allowNull: true,
@@ -53,14 +58,18 @@ module.exports = db.define("accounts", {
     updatedAt: false,
     hooks: {
         afterFind: (accounts) => {
-            const parsePreferences = (account) => {
-                if (account && account.preferences && typeof account.preferences === 'string') {
+            const parseJsonField = (account, field, fallback) => {
+                if (account && typeof account[field] === "string") {
                     try {
-                        account.preferences = JSON.parse(account.preferences);
+                        account[field] = JSON.parse(account[field]);
                     } catch {
-                        account.preferences = {};
+                        account[field] = fallback;
                     }
                 }
+            };
+            const parsePreferences = (account) => {
+                parseJsonField(account, "preferences", {});
+                parseJsonField(account, "oidcGroups", []);
             };
             
             if (Array.isArray(accounts)) {
